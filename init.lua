@@ -1,46 +1,5 @@
 --[[
 
-=====================================================================
-==================== READ THIS BEFORE CONTINUING ====================
-=====================================================================
-========                                    .-----.          ========
-========         .----------------------.   | === |          ========
-========         |.-""""""""""""""""""-.|   |-----|          ========
-========         ||                    ||   | === |          ========
-========         ||   KICKSTART.NVIM   ||   |-----|          ========
-========         ||                    ||   | === |          ========
-========         ||                    ||   |-----|          ========
-========         ||:Tutor              ||   |:::::|          ========
-========         |'-..................-'|   |____o|          ========
-========         `"")----------------(""`   ___________      ========
-========        /::::::::::|  |::::::::::\  \ no mouse \     ========
-========       /:::========|  |==hjkl==:::\  \ required \    ========
-========      '""""""""""""'  '""""""""""""'  '""""""""""'   ========
-========                                                     ========
-=====================================================================
-=====================================================================
-
-What is Kickstart?
-
-  Kickstart.nvim is *not* a distribution.
-
-  Kickstart.nvim is a starting point for your own configuration.
-    The goal is that you can read every line of code, top-to-bottom, understand
-    what your configuration is doing, and modify it to suit your needs.
-
-    Once you've done that, you can start exploring, configuring and tinkering to
-    make Neovim your own! That might mean leaving Kickstart just the way it is for a while
-    or immediately breaking it into modular pieces. It's up to you!
-
-    If you don't know anything about Lua, I recommend taking some time to read through
-    a guide. One possible example which will only take 10-15 minutes:
-      - https://learnxinyminutes.com/docs/lua/
-
-    After understanding a bit more about Lua, you can use `:help lua-guide` as a
-    reference for how Neovim integrates Lua.
-    - :help lua-guide
-    - (or HTML version): https://neovim.io/doc/user/lua-guide.html
-
 Kickstart Guide:
 
   TODO: The very first thing you should do is to run the command `:Tutor` in Neovim.
@@ -163,6 +122,26 @@ vim.opt.scrolloff = 10
 --  See `:help hlsearch`
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
+-- [[ My Custom Keybinds ]]
+vim.keymap.set('n', '<leader>bd', ':bd<CR>') -- ,q -> Close buffer
+vim.keymap.set('n', '<Tab>', ':bnext<CR>') -- Tab -> Switch to next buffer
+vim.keymap.set('n', '<S-Tab>', ':bprevious<CR>') -- Tab -> Switch to previous buffer
+vim.keymap.set('n', '<leader>so', ':luafile ~/.config/nvim/init.lua<CR>')
+vim.keymap.set('n', '<leader>wf', ':w<CR>')
+vim.keymap.set('n', '<leader>i', ':e ~/.config/nvim/init.lua<CR>')
+-- AI keybinds
+
+vim.keymap.set('n', '<leader>aa', ':CodeCompanionActions<CR>')
+vim.keymap.set('n', '<leader>ai', ':CodeCompanion #buffer ')
+vim.keymap.set('n', '<leader>ao', ':CodeCompanionChat<CR>')
+vim.keymap.set('n', '<leader>ad', ':CodeCompanion /docs<CR>')
+vim.keymap.set('n', '<leader>ac', ':CodeCompanion /commit<CR>')
+vim.keymap.set('n', '<leader>af', ':CodeCompanion /fix<CR>')
+vim.keymap.set('n', '<leader>at', ':CodeCompanion /tests<CR>')
+vim.keymap.set('n', '<leader>aqc', ':CopilotChatClose<CR>')
+vim.keymap.set('n', '<leader>aqr', ':CopilotChatReset<CR>')
+vim.keymap.set('n', '<leader>ar', ':CopilotChatReview<CR>')
+
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
@@ -252,6 +231,64 @@ require('lazy').setup({
   -- options to `gitsigns.nvim`.
   --
   -- See `:help gitsigns` to understand what the configuration keys do
+  {
+    'nvim-flutter/flutter-tools.nvim',
+    lazy = false,
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'stevearc/dressing.nvim', -- optional for vim.ui.select
+    },
+    config = true,
+    opts = {},
+  },
+  {
+    'CopilotC-Nvim/CopilotChat.nvim',
+    dependencies = {
+      { 'zbirenbaum/copilot.lua' }, -- or zbirenbaum/copilot.lua
+      { 'nvim-lua/plenary.nvim', branch = 'master' }, -- for curl, log and async functions
+    },
+    build = 'make tiktoken', -- Only on MacOS or Linux
+    opts = {
+      -- See Configuration section for options
+    },
+    -- See Commands section for default commands if you want to lazy load on them
+  },
+  {
+    'olimorris/codecompanion.nvim',
+    config = true,
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'nvim-treesitter/nvim-treesitter',
+    },
+    opts = {
+      strategies = {
+        chat = {
+          adapter = 'copilot',
+        },
+        inline = {
+          adapter = 'copilot',
+        },
+      },
+    },
+  },
+  {
+    'zbirenbaum/copilot.lua',
+    opts = {
+      suggestion = {
+        auto_trigger = true,
+        keymap = {
+          accept = '<C-j>',
+        },
+      },
+    },
+  },
+  {
+    'windwp/nvim-autopairs',
+    event = 'InsertEnter',
+    config = true,
+    -- use opts = {} for passing setup options
+    -- this is equivalent to setup({}) function
+  },
   { -- Adds git related signs to the gutter, as well as utilities for managing changes
     'lewis6991/gitsigns.nvim',
     opts = {
@@ -641,6 +678,7 @@ require('lazy').setup({
         },
       }
 
+      local lsp_config = require 'lspconfig'
       -- LSP servers and clients are able to communicate to each other what features they support.
       --  By default, Neovim doesn't support everything that is in the LSP specification.
       --  When you add nvim-cmp, luasnip, etc. Neovim now has *more* capabilities.
@@ -720,6 +758,15 @@ require('lazy').setup({
           end,
         },
       }
+      -- Dart LSP Setup (has to be separate from Mason stuff)
+      lsp_config['dartls'].setup {
+        settings = {
+          dart = {
+            vim.fn.expand '$HOME/AppData/Local/Pub/Cache',
+            vim.fn.expand '$HOME/ pub-cache',
+          },
+        },
+      }
     end,
   },
 
@@ -794,6 +841,7 @@ require('lazy').setup({
           -- },
         },
       },
+      'mlaursen/vim-react-snippets',
       'saadparwaiz1/cmp_luasnip',
 
       -- Adds other completion capabilities.
@@ -804,6 +852,7 @@ require('lazy').setup({
       'hrsh7th/cmp-nvim-lsp-signature-help',
     },
     config = function()
+      require('vim-react-snippets').lazy_load()
       -- See `:help cmp`
       local cmp = require 'cmp'
       local luasnip = require 'luasnip'
@@ -870,6 +919,9 @@ require('lazy').setup({
           --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
         },
         sources = {
+          per_filetype = {
+            codecompanion = { 'codecompanion' },
+          },
           {
             name = 'lazydev',
             -- set group index to 0 to skip loading LuaLS completions as lazydev recommends it
@@ -1022,3 +1074,16 @@ require('lazy').setup({
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
+--
+-- AI setup
+
+require('codecompanion').setup {
+  strategies = {
+    chat = {
+      adapter = 'copilot',
+    },
+    inline = {
+      adapter = 'copilot',
+    },
+  },
+}
