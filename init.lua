@@ -127,20 +127,21 @@ vim.keymap.set('n', '<leader>bd', ':bd<CR>') -- ,q -> Close buffer
 vim.keymap.set('n', '<Tab>', ':bnext<CR>') -- Tab -> Switch to next buffer
 vim.keymap.set('n', '<S-Tab>', ':bprevious<CR>') -- Tab -> Switch to previous buffer
 vim.keymap.set('n', '<leader>so', ':luafile ~/.config/nvim/init.lua<CR>')
-vim.keymap.set('n', '<leader>wf', ':w<CR>')
+vim.keymap.set('n', '<leader>wf', ':w<CR>', { desc = '[W]rite [F]ile' })
 vim.keymap.set('n', '<leader>i', ':e ~/.config/nvim/init.lua<CR>')
+vim.keymap.set('n', '<leader>wt', ':12sp | term<CR>', { desc = 'Open a new [W]orkspace [T]erminal' })
 -- AI keybinds
 
-vim.keymap.set('n', '<leader>aa', ':CodeCompanionActions<CR>')
-vim.keymap.set('n', '<leader>ai', ':CodeCompanion #buffer ')
-vim.keymap.set('n', '<leader>ao', ':CodeCompanionChat<CR>')
-vim.keymap.set('n', '<leader>ad', ':CodeCompanion /docs<CR>')
-vim.keymap.set('n', '<leader>ac', ':CodeCompanion /commit<CR>')
-vim.keymap.set('n', '<leader>af', ':CodeCompanion /fix<CR>')
-vim.keymap.set('n', '<leader>at', ':CodeCompanion /tests<CR>')
-vim.keymap.set('n', '<leader>aqc', ':CopilotChatClose<CR>')
-vim.keymap.set('n', '<leader>aqr', ':CopilotChatReset<CR>')
-vim.keymap.set('n', '<leader>ar', ':CopilotChatReview<CR>')
+vim.keymap.set('n', '<leader>aa', ':CodeCompanionActions<CR>', { desc = 'Trigger [A]I [A]ctions' })
+vim.keymap.set('n', '<leader>ai', ':CodeCompanion #buffer ', { desc = 'Trigger [A]I [I]nteraction for buffer' })
+vim.keymap.set('n', '<leader>ao', ':CodeCompanionChat<CR>', { desc = 'Open [A]I [O]utput chat' })
+vim.keymap.set('n', '<leader>ad', ':CodeCompanion /docs<CR>', { desc = 'Generate [A]I [D]ocumentation' })
+vim.keymap.set('n', '<leader>ac', ':CodeCompanion /commit<CR>', { desc = 'Generate [A]I [C]ommit message' })
+vim.keymap.set('n', '<leader>af', ':CodeCompanion /fix<CR>', { desc = 'Generate [A]I [F]ix suggestions' })
+vim.keymap.set('n', '<leader>at', ':CodeCompanion /tests<CR>', { desc = 'Generate [A]I [T]ests' })
+vim.keymap.set('n', '<leader>aqc', ':CopilotChatClose<CR>', { desc = 'Close [A]I [Q]uick [C]hat' })
+vim.keymap.set('n', '<leader>aqr', ':CopilotChatReset<CR>', { desc = 'Reset [A]I [Q]uick [R]esponse' })
+vim.keymap.set('n', '<leader>ar', ':CopilotChatReview<CR>', { desc = 'Trigger [A]I [R]eview' })
 
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
@@ -179,6 +180,14 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function()
     vim.highlight.on_yank()
+  end,
+})
+
+-- Fix CSS asterisk autopair issue
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'css', 'scss', 'less' },
+  callback = function()
+    vim.opt_local.formatoptions:remove { 'r', 'o' }
   end,
 })
 
@@ -231,6 +240,21 @@ require('lazy').setup({
   -- options to `gitsigns.nvim`.
   --
   -- See `:help gitsigns` to understand what the configuration keys do
+  'tpope/vim-fugitive',
+  {
+    'google/vim-codefmt',
+    dependencies = {
+      'google/vim-maktaba',
+      'google/vim-glaive',
+    },
+  },
+  {
+    'Davidyz/VectorCode',
+    version = '*', -- optional, depending on whether you're on nightly or release
+    dependencies = { 'nvim-lua/plenary.nvim' },
+    build = 'pipx upgrade vectorcode', -- optional but recommended. This keeps your CLI up-to-date.
+    cmd = 'VectorCode', -- if you're lazy-loading VectorCode
+  },
   {
     'nvim-flutter/flutter-tools.nvim',
     lazy = false,
@@ -254,20 +278,51 @@ require('lazy').setup({
     -- See Commands section for default commands if you want to lazy load on them
   },
   {
-    'olimorris/codecompanion.nvim',
-    config = true,
+    'ravitemer/mcphub.nvim',
     dependencies = {
       'nvim-lua/plenary.nvim',
-      'nvim-treesitter/nvim-treesitter',
+    },
+    build = 'npm install -g mcp-hub@latest',
+    config = function()
+      require('mcphub').setup()
+    end,
+  },
+  {
+    'olimorris/codecompanion.nvim',
+    dependencies = {
+      { 'nvim-treesitter/nvim-treesitter', build = ':TSUpdate' },
+      { 'nvim-lua/plenary.nvim' },
+      -- Test with nvim-cmp
+      { 'hrsh7th/nvim-cmp' },
     },
     opts = {
+      --Refer to: https://github.com/olimorris/codecompanion.nvim/blob/main/lua/codecompanion/config.lua
+      extensions = {
+        mcphub = {
+          callback = 'mcphub.extensions.codecompanion',
+          opts = {
+            show_result_in_chat = true, -- Show mcp tool results in chat
+            make_vars = true, -- Convert resources to #variables
+            make_slash_commands = true, -- Add prompts as /slash commands
+          },
+        },
+        vectorcode = {
+          opts = {
+            add_tool = true,
+          },
+        },
+      },
       strategies = {
+        --NOTE: Change the adapter as required
         chat = {
           adapter = 'copilot',
+          -- adapter = 'ollama',
         },
-        inline = {
-          adapter = 'copilot',
-        },
+        inline = { adapter = 'copilot' },
+        -- inline = { adapter = 'ollama' },
+      },
+      opts = {
+        log_level = 'DEBUG',
       },
     },
   },
@@ -289,17 +344,10 @@ require('lazy').setup({
     -- use opts = {} for passing setup options
     -- this is equivalent to setup({}) function
   },
-  { -- Adds git related signs to the gutter, as well as utilities for managing changes
-    'lewis6991/gitsigns.nvim',
-    opts = {
-      signs = {
-        add = { text = '+' },
-        change = { text = '~' },
-        delete = { text = '_' },
-        topdelete = { text = '‾' },
-        changedelete = { text = '~' },
-      },
-    },
+  {
+    'kylechui/nvim-surround',
+    event = 'VeryLazy',
+    opts = {},
   },
 
   -- NOTE: Plugins can also be configured to run Lua code when they are loaded.
@@ -362,6 +410,7 @@ require('lazy').setup({
 
       -- Document existing key chains
       spec = {
+        { '<leader>a', group = '[A]I', mode = { 'n', 'x' } },
         { '<leader>c', group = '[C]ode', mode = { 'n', 'x' } },
         { '<leader>d', group = '[D]ocument' },
         { '<leader>r', group = '[R]ename' },
@@ -384,6 +433,11 @@ require('lazy').setup({
     'nvim-telescope/telescope.nvim',
     event = 'VimEnter',
     branch = '0.1.x',
+    opts = {
+      defaults = {
+        file_ignore_patterns = { 'node_modules', '.git' },
+      },
+    },
     dependencies = {
       'nvim-lua/plenary.nvim',
       { -- If encountering errors, see telescope-fzf-native README for installation instructions
@@ -455,7 +509,24 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
       vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
       vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
-      vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
+      vim.keymap.set('n', '<leader>sde', function()
+        require('telescope.builtin').diagnostics {
+          severity = vim.diagnostic.severity.ERROR,
+        }
+      end, { desc = '[S]earch [D]iagnostics [E]rrors' })
+
+      vim.keymap.set('n', '<leader>sdw', function()
+        require('telescope.builtin').diagnostics {
+          severity = vim.diagnostic.severity.WARN,
+        }
+      end, { desc = '[S]earch [D]iagnostics [W]arnings' })
+
+      vim.keymap.set('n', '<leader>sdh', function()
+        require('telescope.builtin').diagnostics {
+          severity = vim.diagnostic.severity.HINT,
+        }
+      end, { desc = '[S]earch [D]iagnostics [H]ints' })
+      vim.keymap.set('n', '<leader>sda', builtin.diagnostics, { desc = '[S]earch [D]iagnostics [A]ll' })
       vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
       vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
       vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
@@ -550,7 +621,6 @@ require('lazy').setup({
         callback = function(event)
           -- NOTE: Remember that Lua is a real programming language, and as such it is possible
           -- to define small helper and utility functions so you don't have to repeat yourself.
-          --
           -- In this case, we create a function that lets us more easily define mappings specific
           -- for LSP related items. It sets the mode, buffer and description for us each time.
           local map = function(keys, func, desc, mode)
@@ -759,15 +829,24 @@ require('lazy').setup({
         },
       }
       -- Dart LSP Setup (has to be separate from Mason stuff)
-      lsp_config['dartls'].setup {
-        settings = {
-          dart = {
-            vim.fn.expand '$HOME/AppData/Local/Pub/Cache',
-            vim.fn.expand '$HOME/ pub-cache',
-          },
-        },
-      }
+      -- lsp_config['dartls'].setup {
+      --   settings = {
+      --     dart = {
+      --       vim.fn.expand '$HOME/AppData/Local/Pub/Cache',
+      --       vim.fn.expand '$HOME/ pub-cache',
+      --     },
+      --   },
+      -- }
     end,
+  },
+  {
+    'mfussenegger/nvim-dap',
+    opts = {},
+  },
+  {
+
+    'jay-babu/mason-nvim-dap.nvim',
+    opts = {},
   },
 
   { -- Autoformat
@@ -804,6 +883,7 @@ require('lazy').setup({
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
+        java = { 'google-java-format' },
         -- Conform can also run multiple formatters sequentially
         -- python = { "isort", "black" },
         --
@@ -858,6 +938,9 @@ require('lazy').setup({
       local luasnip = require 'luasnip'
       luasnip.config.setup {}
 
+      -- Load custom snippets from ~/.config/nvim/snippets
+      require('luasnip.loaders.from_lua').load { paths = '~/.config/nvim/snippets' }
+
       cmp.setup {
         snippet = {
           expand = function(args)
@@ -883,8 +966,7 @@ require('lazy').setup({
           -- Accept ([y]es) the completion.
           --  This will auto-import if your LSP supports it.
           --  This will expand snippets if the LSP sent a snippet.
-          ['<C-y>'] = cmp.mapping.confirm { select = true },
-
+          ['<C-;>'] = cmp.mapping.confirm { select = true },
           -- If you prefer more traditional completion keymaps,
           -- you can uncomment the following lines
           --['<CR>'] = cmp.mapping.confirm { select = true },
@@ -935,26 +1017,34 @@ require('lazy').setup({
       }
     end,
   },
+  -- COLOR SCHEMES
 
+  {
+    'rebelot/kanagawa.nvim',
+  },
+
+  {
+    'cocopon/iceberg.vim',
+  },
   { -- You can easily change to a different colorscheme.
     -- Change the name of the colorscheme plugin below, and then
     -- change the command in the config to whatever the name of that colorscheme is.
     --
     -- If you want to see what colorschemes are already installed, you can use `:Telescope colorscheme`.
-    'folke/tokyonight.nvim',
+    'sainnhe/everforest',
     priority = 1000, -- Make sure to load this before all the other start plugins.
     config = function()
       ---@diagnostic disable-next-line: missing-fields
-      require('tokyonight').setup {
-        styles = {
-          comments = { italic = false }, -- Disable italics in comments
-        },
-      }
+      -- require('everforest').setup {
+      --   styles = {
+      --     comments = { italic = false }, -- Disable italics in comments
+      --   },
+      -- }
 
       -- Load the colorscheme here.
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-      vim.cmd.colorscheme 'tokyonight-night'
+      vim.cmd.colorscheme 'kanagawa'
     end,
   },
 
@@ -1077,13 +1167,18 @@ require('lazy').setup({
 --
 -- AI setup
 
-require('codecompanion').setup {
-  strategies = {
-    chat = {
-      adapter = 'copilot',
-    },
-    inline = {
-      adapter = 'copilot',
-    },
-  },
+vim.cmd [[
+  " Initialize Glaive and set up codefmt
+  call glaive#Install()
+  Glaive codefmt plugin[mappings]
+  Glaive codefmt google_java_executable="java -jar ~/.local/bin/google-java-format.jar"
+]]
+require('mason-nvim-dap').setup {
+  automatic_setup = true,
+  ensure_installed = { 'java-debug-adapter', 'java-test' }, -- Adapter names may vary
 }
+
+-- Set up netrw settings for ssh browsing
+
+vim.g.netrw_liststyle = 3 -- Tree view
+vim.g.netrw_hide = 0 -- Show hidden files by default
