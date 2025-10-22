@@ -130,6 +130,7 @@ vim.keymap.set('n', '<leader>so', ':luafile ~/.config/nvim/init.lua<CR>')
 vim.keymap.set('n', '<leader>wf', ':w<CR>', { desc = '[W]rite [F]ile' })
 vim.keymap.set('n', '<leader>i', ':e ~/.config/nvim/init.lua<CR>')
 vim.keymap.set('n', '<leader>wt', ':12sp | term<CR>', { desc = 'Open a new [W]orkspace [T]erminal' })
+vim.keymap.set('n', '<leader>cc', ':Codi<CR>', { desc = '[C]odi your [C]ode' })
 -- AI keybinds
 
 vim.keymap.set('n', '<leader>aa', ':CodeCompanionActions<CR>', { desc = 'Trigger [A]I [A]ctions' })
@@ -230,7 +231,7 @@ require('lazy').setup({
   --    {
   --        'lewis6991/gitsigns.nvim',
   --        config = function()
-  --            require('gitsigns').setup({
+  --            require('gitsigns').setup
   --                -- Your gitsigns configuration here
   --            })
   --        end,
@@ -349,6 +350,7 @@ require('lazy').setup({
     event = 'VeryLazy',
     opts = {},
   },
+  'metakirby5/codi.vim',
 
   -- NOTE: Plugins can also be configured to run Lua code when they are loaded.
   --
@@ -1044,7 +1046,7 @@ require('lazy').setup({
       -- Load the colorscheme here.
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-      vim.cmd.colorscheme 'kanagawa'
+      vim.cmd.colorscheme 'iceberg'
     end,
   },
 
