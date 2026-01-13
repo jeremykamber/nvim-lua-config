@@ -182,14 +182,16 @@ require('lazy').setup({
         },
       }
 
-      mlsp.setup_handlers {
-        function(server_name)
-          if server_name == 'tsserver' or server_name == 'ts_ls' then return end
-          local config = servers[server_name] or {}
-          config.capabilities = capabilities
-          require('lspconfig')[server_name].setup(config)
-        end,
-      }
+      if mlsp.setup_handlers then
+        mlsp.setup_handlers {
+          function(server_name)
+            if server_name == 'tsserver' or server_name == 'ts_ls' then return end
+            local config = servers[server_name] or {}
+            config.capabilities = capabilities
+            require('lspconfig')[server_name].setup(config)
+          end,
+        }
+      end
     end,
   },
 
@@ -333,7 +335,6 @@ require('lazy').setup({
       { '<leader>sD', '<cmd>FzfLua diagnostics_workspace<cr>', desc = 'Search Workspace Diagnostics' },
     },
     opts = {
-      'fzf-hover',
       winopts = {
         preview = {
           hidden = 'nohidden',
