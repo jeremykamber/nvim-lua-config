@@ -340,6 +340,10 @@ require('lazy').setup({
           ['ctrl-d'] = 'preview-page-down',
           ['ctrl-u'] = 'preview-page-up',
         },
+        builtin = {
+          ['<C-d>'] = 'preview-page-down',
+          ['<C-u>'] = 'preview-page-up',
+        },
       },
       winopts = {
         preview = {
