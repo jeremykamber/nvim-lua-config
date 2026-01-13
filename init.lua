@@ -12,7 +12,7 @@ vim.opt.timeoutlen = 300
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.signcolumn = 'yes'
-vim.opt.cursorline = true
+vim.opt.cursorline = false  -- Disabled for performance on slower terminals
 vim.opt.termguicolors = true
 vim.opt.scrolloff = 10
 
@@ -36,10 +36,10 @@ vim.opt.inccommand = 'split'
 vim.opt.splitright = true
 vim.opt.splitbelow = true
 
--- Clipboard
-vim.schedule(function()
-  vim.opt.clipboard = 'unnamedplus'
-end)
+-- Clipboard (only use system clipboard with explicit keymaps, not every delete)
+-- vim.schedule(function()
+--   vim.opt.clipboard = 'unnamedplus'
+-- end)
 
 -- ============================================================================
 -- LAZY.NVIM BOOTSTRAP
@@ -70,18 +70,12 @@ require('lazy').setup({
 
   {
     'rebelot/kanagawa.nvim',
-    priority = 1000,
-    config = function()
-      -- vim.cmd.colorscheme 'kanagawa'
-    end,
+    enabled = false,
   },
 
   {
     'cocopon/iceberg.vim',
-    priority = 1000,
-    config = function()
-      -- vim.cmd.colorscheme 'iceberg'
-    end,
+    enabled = false,
   },
 
   {
@@ -101,7 +95,7 @@ require('lazy').setup({
     main = 'nvim-treesitter.configs',
     opts = {
       ensure_installed = { 'lua', 'python', 'javascript', 'typescript', 'dart', 'java' },
-      auto_install = true,
+      auto_install = false,  -- Disabled for performance (manually install as needed)
       highlight = { enable = true },
       indent = { enable = true },
     },
@@ -110,7 +104,7 @@ require('lazy').setup({
   -- LSP
   {
     'neovim/nvim-lspconfig',
-    event = { 'BufReadPre', 'BufNewFile' },
+    event = { 'BufReadPost', 'BufNewFile' },  -- Lazy-load only when files are opened, not BufReadPre
     dependencies = {
       'williamboman/mason.nvim',
       'williamboman/mason-lspconfig.nvim',
@@ -120,7 +114,8 @@ require('lazy').setup({
       require('mason').setup()
       require('fidget').setup {}
 
-      require('mason-lspconfig').setup {
+      local mlsp = require 'mason-lspconfig'
+      mlsp.setup {
         ensure_installed = { 'lua_ls', 'pyright' },
       }
 
@@ -144,19 +139,18 @@ require('lazy').setup({
         end,
       })
 
-      -- Capabilities for nvim-cmp
+      -- Capabilities for blink.cmp
       local capabilities = vim.lsp.protocol.make_client_capabilities()
-      capabilities = vim.tbl_deep_extend('force', capabilities, require('cmp_nvim_lsp').default_capabilities())
 
       -- Auto-setup servers
-      require('mason-lspconfig').setup_handlers {
+      if mlsp.setup_handlers then mlsp.setup_handlers {
         function(server_name)
           -- EXCLUDE tsserver/ts_ls because typescript-tools.nvim handles it!
           if server_name ~= 'tsserver' and server_name ~= 'ts_ls' then
             require('lspconfig')[server_name].setup { capabilities = capabilities }
           end
         end,
-      }
+      } end
     end,
   },
 
@@ -180,60 +174,30 @@ require('lazy').setup({
   {
     'L3MON4D3/LuaSnip',
     dependencies = { 'rafamadriz/friendly-snippets' },
+    lazy = true,
   },
 
-  -- Completion
+  -- Completion (Rust-powered for speed and low RAM)
   {
-    'hrsh7th/nvim-cmp',
+    'saghen/blink.cmp',
+    dependencies = { 'rafamadriz/friendly-snippets', 'L3MON4D3/LuaSnip' },
+    version = '*',
     event = 'InsertEnter',
-    dependencies = {
-      'hrsh7th/cmp-nvim-lsp',
-      'hrsh7th/cmp-buffer',
-      'L3MON4D3/LuaSnip',
-      'hrsh7th/cmp-path',
-      'saadparwaiz1/cmp_luasnip',
-    },
     config = function()
-      local cmp = require 'cmp'
-      local luasnip = require 'luasnip'
-
-      -- Load custom snippets
       require('luasnip.loaders.from_lua').lazy_load { paths = '~/.config/nvim/snippets' }
       require('luasnip.loaders.from_vscode').lazy_load()
 
-      cmp.setup {
-        snippet = {
-          expand = function(args)
-            luasnip.lsp_expand(args.body)
-          end,
+      require('blink.cmp').setup {
+        snippets = { preset = 'luasnip' },
+        keymap = {
+          preset = 'default',
+          ['<C-k>'] = { 'select_and_accept', 'fallback' },
         },
-        mapping = cmp.mapping.preset.insert {
-          ['<C-n>'] = cmp.mapping.select_next_item(),
-          ['<C-p>'] = cmp.mapping.select_prev_item(),
-          ['<C-b>'] = cmp.mapping.scroll_docs(-4),
-          ['<C-f>'] = cmp.mapping.scroll_docs(4),
-          ['<C-Space>'] = cmp.mapping.complete(),
-          ['<C-e>'] = cmp.mapping.abort(),
-          -- Confirm completion with <C-k>, select first item by default
-          ['<C-k>'] = cmp.mapping.confirm { select = true },
-          -- Remove <CR> as confirm key
-          ['<C-l>'] = cmp.mapping(function()
-            if luasnip.expand_or_locally_jumpable() then
-              luasnip.expand_or_jump()
-            end
-          end, { 'i', 's' }),
-          ['<C-h>'] = cmp.mapping(function()
-            if luasnip.locally_jumpable(-1) then
-              luasnip.jump(-1)
-            end
-          end, { 'i', 's' }),
+        appearance = {
+          nerd_font_variant = 'mono'
         },
         sources = {
-          { name = 'copilot', group_index = 2 },
-          { name = 'nvim_lsp', group_index = 2 },
-          { name = 'luasnip', group_index = 2 },
-          { name = 'buffer', group_index = 2 },
-          { name = 'path', group_index = 2 },
+          default = { 'lsp', 'path', 'snippets', 'buffer' }
         },
       }
     end,
@@ -286,7 +250,7 @@ require('lazy').setup({
     },
   },
 
-  -- Telescope
+  -- Telescope (search - can be replaced with fzf-lua for even better perf)
   {
     'nvim-telescope/telescope.nvim',
     event = 'VimEnter',
@@ -454,17 +418,14 @@ require('lazy').setup({
     cmd = { 'Git', 'G' },
   },
 
-  -- Status line
+  -- Status line (Replaced with lighter alternative)
   {
-    'nvim-lualine/lualine.nvim',
+    'echasnovski/mini.statusline',
     event = 'VeryLazy',
-    opts = {
-      options = {
-        theme = 'auto',
-        component_separators = '|',
-        section_separators = '',
-      },
-    },
+    version = false,
+    config = function()
+      require('mini.statusline').setup()
+    end,
   },
 
   -- Which-key
@@ -489,10 +450,17 @@ require('lazy').setup({
     rtp = {
       disabled_plugins = {
         'gzip',
+        'matchit',
+        'matchparen',
+        'netrwPlugin',
         'tarPlugin',
         'tohtml',
         'tutor',
         'zipPlugin',
+        'shada',
+        'spellfile',
+        'vimball',
+        'remote_plugins',
       },
     },
   },
