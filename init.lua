@@ -5,8 +5,10 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
 -- Performance
-vim.opt.updatetime = 250
+vim.opt.updatetime = 200
 vim.opt.timeoutlen = 300
+vim.opt.ttimeoutlen = 10
+vim.opt.shada = "!,'100,<50,s10,h" -- Limit shada size for faster startup
 
 -- UI
 vim.opt.number = true
@@ -94,9 +96,18 @@ require('lazy').setup({
     event = { 'BufReadPost', 'BufNewFile' },
     main = 'nvim-treesitter.configs',
     opts = {
-      ensure_installed = { 'lua', 'python', 'javascript', 'typescript', 'dart', 'java' },
-      auto_install = false,  -- Disabled for performance (manually install as needed)
-      highlight = { enable = true },
+      ensure_installed = { 'lua', 'python', 'javascript', 'typescript', 'tsx', 'css', 'html' },
+      auto_install = false,
+      highlight = {
+        enable = true,
+        disable = function(lang, buf)
+          local max_filesize = 100 * 1024 -- 100 KB
+          local ok, stats = pcall(vim.loop.fs_stat, vim.api.nvim_buf_get_name(buf))
+          if ok and stats and stats.size > max_filesize then
+            return true
+          end
+        end,
+      },
       indent = { enable = true },
     },
   },
@@ -104,7 +115,7 @@ require('lazy').setup({
   -- LSP
   {
     'neovim/nvim-lspconfig',
-    event = { 'BufReadPost', 'BufNewFile' },  -- Lazy-load only when files are opened, not BufReadPre
+    event = { 'BufReadPost', 'BufNewFile' },
     dependencies = {
       'williamboman/mason.nvim',
       'williamboman/mason-lspconfig.nvim',
@@ -119,6 +130,12 @@ require('lazy').setup({
         ensure_installed = { 'lua_ls', 'pyright' },
       }
 
+      local capabilities = vim.lsp.protocol.make_client_capabilities()
+      -- Optimize for blink.cmp
+      if package.loaded['blink.cmp'] then
+        capabilities = require('blink.cmp').get_lsp_capabilities(capabilities)
+      end
+
       -- LSP keymaps on attach
       vim.api.nvim_create_autocmd('LspAttach', {
         callback = function(event)
@@ -126,12 +143,15 @@ require('lazy').setup({
             vim.keymap.set('n', keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
           end
 
-          map('gd', require('telescope.builtin').lsp_definitions, 'Goto Definition')
-          map('gr', require('telescope.builtin').lsp_references, 'Goto References')
-          map('gI', require('telescope.builtin').lsp_implementations, 'Goto Implementation')
-          map('<leader>D', require('telescope.builtin').lsp_type_definitions, 'Type Definition')
-          map('<leader>ds', require('telescope.builtin').lsp_document_symbols, 'Document Symbols')
-          map('<leader>ws', require('telescope.builtin').lsp_dynamic_workspace_symbols, 'Workspace Symbols')
+          -- Using fzf-lua for LSP lookups (faster than telescope)
+          local fzf = require 'fzf-lua'
+          map('gd', fzf.lsp_definitions, 'Goto Definition')
+          map('gr', fzf.lsp_references, 'Goto References')
+          map('gI', fzf.lsp_implementations, 'Goto Implementation')
+          map('<leader>D', fzf.lsp_typedefs, 'Type Definition')
+          map('<leader>ds', fzf.lsp_document_symbols, 'Document Symbols')
+          map('<leader>ws', fzf.lsp_live_workspace_symbols, 'Workspace Symbols')
+
           map('<leader>rn', vim.lsp.buf.rename, 'Rename')
           map('<leader>ca', vim.lsp.buf.code_action, 'Code Action')
           map('K', vim.lsp.buf.hover, 'Hover Documentation')
@@ -139,28 +159,65 @@ require('lazy').setup({
         end,
       })
 
-      -- Capabilities for blink.cmp
-      local capabilities = vim.lsp.protocol.make_client_capabilities()
+      -- Servers setup
+      local servers = {
+        lua_ls = {
+          settings = {
+            Lua = {
+              completion = { callSnippet = 'Replace' },
+              diagnostics = { disable = { 'missing-fields' } },
+            },
+          },
+        },
+        pyright = {
+          settings = {
+            python = {
+              analysis = {
+                autoSearchPaths = true,
+                useLibraryCodeForTypes = true,
+                diagnosticMode = 'openFilesOnly', -- Significant memory saver
+              },
+            },
+          },
+        },
+      }
 
-      -- Auto-setup servers
-      if mlsp.setup_handlers then mlsp.setup_handlers {
+      mlsp.setup_handlers {
         function(server_name)
-          -- EXCLUDE tsserver/ts_ls because typescript-tools.nvim handles it!
-          if server_name ~= 'tsserver' and server_name ~= 'ts_ls' then
-            require('lspconfig')[server_name].setup { capabilities = capabilities }
-          end
+          if server_name == 'tsserver' or server_name == 'ts_ls' then return end
+          local config = servers[server_name] or {}
+          config.capabilities = capabilities
+          require('lspconfig')[server_name].setup(config)
         end,
-      } end
+      }
     end,
   },
 
   {
     'pmizio/typescript-tools.nvim',
+    ft = { 'javascript', 'typescript', 'javascriptreact', 'typescriptreact' },
     dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
     opts = {
-      -- This spawns the tsserver with a max memory of 4GB (adjust as needed)
-      -- This prevents it from eating 100% of your RAM if it leaks
-      tsserver_max_memory = 2048,
+      tsserver_max_memory = 1536, -- Reduced for more aggressive memory management
+      separate_diagnostic_server = true, -- Better UI responsiveness
+      publish_diagnostic_on = 'insert_leave', -- Reduces overhead
+      expose_as_code_action = 'all',
+      settings = {
+        tsserver_file_preferences = {
+          includeInlayParameterNameHints = 'none', -- Performance
+          includeInlayVariableTypeHints = false,
+        },
+      },
+    },
+  },
+
+  {
+    'folke/lazydev.nvim',
+    ft = 'lua',
+    opts = {
+      library = {
+        { path = 'luvit-meta/library', words = { 'vim%.uv' } },
+      },
     },
   },
 
@@ -183,23 +240,32 @@ require('lazy').setup({
     dependencies = { 'rafamadriz/friendly-snippets', 'L3MON4D3/LuaSnip' },
     version = '*',
     event = 'InsertEnter',
-    config = function()
-      require('luasnip.loaders.from_lua').lazy_load { paths = '~/.config/nvim/snippets' }
+    opts = {
+      snippets = {
+        preset = 'luasnip',
+        expand = function(snippet) require('luasnip').lsp_expand(snippet) end,
+        active = function(filter) return require('luasnip').locally_jumpable() end,
+        jump = function(direction) require('luasnip').jump(direction) end,
+      },
+      keymap = {
+        preset = 'default',
+        ['<C-k>'] = { 'accept', 'fallback' },
+      },
+      appearance = {
+        nerd_font_variant = 'mono',
+      },
+      sources = {
+        default = { 'lsp', 'path', 'snippets', 'buffer' },
+      },
+      completion = {
+        list = { selection = { preselect = false, auto_insert = true } },
+        menu = { auto_show = true },
+        ghost_text = { enabled = true },
+      },
+    },
+    config = function(_, opts)
       require('luasnip.loaders.from_vscode').lazy_load()
-
-      require('blink.cmp').setup {
-        snippets = { preset = 'luasnip' },
-        keymap = {
-          preset = 'default',
-          ['<C-k>'] = { 'select_and_accept', 'fallback' },
-        },
-        appearance = {
-          nerd_font_variant = 'mono'
-        },
-        sources = {
-          default = { 'lsp', 'path', 'snippets', 'buffer' }
-        },
-      }
+      require('blink.cmp').setup(opts)
     end,
   },
 
@@ -250,67 +316,42 @@ require('lazy').setup({
     },
   },
 
-  -- Telescope (search - can be replaced with fzf-lua for even better perf)
+  -- fzf-lua (Lightning fast alternative to Telescope)
   {
-    'nvim-telescope/telescope.nvim',
-    event = 'VimEnter',
-    branch = '0.1.x',
-    dependencies = {
-      'nvim-lua/plenary.nvim',
-      {
-        'nvim-telescope/telescope-fzf-native.nvim',
-        build = 'make',
-        cond = function()
-          return vim.fn.executable 'make' == 1
-        end,
-      },
-      'nvim-telescope/telescope-ui-select.nvim',
+    'ibhagwan/fzf-lua',
+    cmd = 'FzfLua',
+    keys = {
+      { '<leader>sf', '<cmd>FzfLua files<cr>', desc = 'Search Files' },
+      { '<leader>sg', '<cmd>FzfLua live_grep<cr>', desc = 'Search by Grep' },
+      { '<leader>sw', '<cmd>FzfLua grep_cword<cr>', desc = 'Search current Word' },
+      { '<leader><leader>', '<cmd>FzfLua buffers<cr>', desc = 'Find buffers' },
+      { '<leader>sh', '<cmd>FzfLua help_tags<cr>', desc = 'Search Help' },
+      { '<leader>sk', '<cmd>FzfLua keymaps<cr>', desc = 'Search Keymaps' },
+      { '<leader>sr', '<cmd>FzfLua resume<cr>', desc = 'Search Resume' },
+      { '<leader>s.', '<cmd>FzfLua oldfiles<cr>', desc = 'Search Recent Files' },
+      { '<leader>sd', '<cmd>FzfLua diagnostics_document<cr>', desc = 'Search Document Diagnostics' },
+      { '<leader>sD', '<cmd>FzfLua diagnostics_workspace<cr>', desc = 'Search Workspace Diagnostics' },
     },
-    config = function()
-      require('telescope').setup {
-        defaults = {
-          file_ignore_patterns = { 'node_modules', '.git' },
+    opts = {
+      'fzf-hover',
+      winopts = {
+        preview = {
+          hidden = 'nohidden',
+          vertical = 'down:45%',
+          layout = 'vertical',
         },
-        pickers = {
-          find_files = {
-            find_command = { 'fd', '--type', 'f', '--color=never', '-E', '.git' },
-          },
-        },
-        extensions = {
-          ['ui-select'] = {
-            require('telescope.themes').get_dropdown(),
-          },
-        },
-      }
+      },
+    },
+  },
 
-      pcall(require('telescope').load_extension, 'fzf')
-      pcall(require('telescope').load_extension, 'ui-select')
-
-      local builtin = require 'telescope.builtin'
-      vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = 'Search Help' })
-      vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = 'Search Keymaps' })
-      vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = 'Search Files' })
-      vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = 'Search current Word' })
-      vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = 'Search by Grep' })
-      vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = 'Search Resume' })
-      vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = 'Search Recent Files' })
-      vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = 'Find buffers' })
-
-      -- Your diagnostic search keymaps
-      vim.keymap.set('n', '<leader>sde', function()
-        builtin.diagnostics { severity = vim.diagnostic.severity.ERROR }
-      end, { desc = 'Search Diagnostics: Errors' })
-
-      vim.keymap.set('n', '<leader>sdw', function()
-        builtin.diagnostics { severity = vim.diagnostic.severity.WARN }
-      end, { desc = 'Search Diagnostics: Warnings' })
-
-      vim.keymap.set('n', '<leader>sdh', function()
-        builtin.diagnostics { severity = vim.diagnostic.severity.HINT }
-      end, { desc = 'Search Diagnostics: Hints' })
-
-      vim.keymap.set('n', '<leader>sda', builtin.diagnostics, { desc = 'Search Diagnostics: All' })
-    end,
+  -- oil.nvim (Fast file exploration)
+  {
+    'stevearc/oil.nvim',
+    opts = {},
+    keys = {
+      { '<leader>pv', '<cmd>Oil<cr>', desc = 'Open parent directory' },
+    },
+    dependencies = { 'nvim-tree/nvim-web-devicons' },
   },
 
   -- Harpoon
@@ -457,10 +498,6 @@ require('lazy').setup({
         'tohtml',
         'tutor',
         'zipPlugin',
-        'shada',
-        'spellfile',
-        'vimball',
-        'remote_plugins',
       },
     },
   },
@@ -489,7 +526,7 @@ vim.keymap.set('n', '<leader>i', '<cmd>e ~/.config/nvim/init.lua<CR>', { desc = 
 
 -- File/write shortcuts
 vim.keymap.set('n', '<leader>wf', '<cmd>w<CR>', { desc = 'Write File' })
-vim.keymap.set('n', '<leader>pv', vim.cmd.Ex, { desc = 'Project view' })
+-- <leader>pv is handled by oil.nvim now
 
 -- Terminal
 vim.keymap.set('n', '<leader>wt', '<cmd>12sp | term<CR>', { desc = 'Open terminal' })
@@ -542,6 +579,33 @@ vim.keymap.set({ 'n', 'v' }, '<leader>d', '"_d')
 -- ============================================================================
 -- AUTOCOMMANDS
 -- ============================================================================
+
+-- Fast terminal exit
+vim.api.nvim_create_autocmd('TermOpen', {
+  group = vim.api.nvim_create_augroup('custom-term-open', { clear = true }),
+  callback = function()
+    vim.opt_local.number = false
+    vim.opt_local.relativenumber = false
+    vim.cmd 'startinsert'
+  end,
+})
+
+-- Large File Optimization
+local bigfile_group = vim.api.nvim_create_augroup('BigFile', { clear = true })
+vim.api.nvim_create_autocmd({ 'BufReadPre', 'FileReadPre' }, {
+  group = bigfile_group,
+  callback = function(ev)
+    local size = vim.fn.getfsize(ev.file)
+    if size > 1024 * 1024 then -- > 1MB
+      vim.b.bigfile = true
+      vim.opt_local.spell = false
+      vim.opt_local.undofile = false
+      vim.opt_local.breakindent = false
+      vim.opt_local.loadplugins = false
+      vim.opt_local.syntax = 'off'
+    end
+  end,
+})
 
 -- Highlight on yank
 vim.api.nvim_create_autocmd('TextYankPost', {
