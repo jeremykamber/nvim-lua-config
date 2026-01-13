@@ -335,6 +335,12 @@ require('lazy').setup({
       { '<leader>sD', '<cmd>FzfLua diagnostics_workspace<cr>', desc = 'Search Workspace Diagnostics' },
     },
     opts = {
+      keymap = {
+        fzf = {
+          ['ctrl-d'] = 'preview-page-down',
+          ['ctrl-u'] = 'preview-page-up',
+        },
+      },
       winopts = {
         preview = {
           hidden = 'nohidden',
