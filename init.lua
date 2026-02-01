@@ -14,7 +14,7 @@ vim.opt.shada = "!,'100,<50,s10,h" -- Limit shada size for faster startup
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.signcolumn = 'yes'
-vim.opt.cursorline = false  -- Disabled for performance on slower terminals
+vim.opt.cursorline = false -- Disabled for performance on slower terminals
 vim.opt.termguicolors = true
 vim.opt.scrolloff = 10
 
@@ -66,11 +66,6 @@ require('lazy').setup({
   -- Colorscheme
 
   {
-    'vim-test/vim-test',
-    cmd = { 'TestFile', 'TestNearest', 'TestSuite', 'TestLast', 'TestVisit' },
-  },
-
-  {
     'rebelot/kanagawa.nvim',
     enabled = false,
   },
@@ -89,6 +84,31 @@ require('lazy').setup({
     end,
   },
 
+  -- Swift Development
+
+  {
+    'wojciech-kulik/xcodebuild.nvim',
+    dependencies = {
+      -- Uncomment a picker that you want to use, snacks.nvim might be additionally
+      -- useful to show previews and failing snapshots.
+
+      -- You must select at least one:
+      -- "nvim-telescope/telescope.nvim",
+      'ibhagwan/fzf-lua',
+      -- "folke/snacks.nvim", -- (optional) to show previews
+
+      'MunifTanjim/nui.nvim',
+      'nvim-tree/nvim-tree.lua', -- (optional) to manage project files
+      'stevearc/oil.nvim', -- (optional) to manage project files
+      'nvim-treesitter/nvim-treesitter', -- (optional) for Quick tests support (required Swift parser)
+    },
+    config = function()
+      require('xcodebuild').setup {
+        -- put some options here or leave it empty to use default settings
+      }
+    end,
+  },
+
   -- Treesitter
   {
     'nvim-treesitter/nvim-treesitter',
@@ -96,7 +116,7 @@ require('lazy').setup({
     event = { 'BufReadPost', 'BufNewFile' },
     main = 'nvim-treesitter.configs',
     opts = {
-      ensure_installed = { 'lua', 'python', 'javascript', 'typescript', 'tsx', 'css', 'html' },
+      ensure_installed = { 'lua', 'python', 'javascript', 'typescript', 'tsx', 'css', 'html', 'swift' },
       auto_install = false,
       highlight = {
         enable = true,
@@ -110,6 +130,26 @@ require('lazy').setup({
       },
       indent = { enable = true },
     },
+  },
+
+  -- Fun stuff
+
+  {
+    'rmagatti/goto-preview',
+    dependencies = { 'rmagatti/logger.nvim' },
+    event = 'BufEnter',
+    config = true, -- necessary as per https://github.com/rmagatti/goto-preview/issues/88
+    opts = {
+      references = {
+        provider = 'fzf_lua',
+      },
+      default_mappings = true,
+    },
+  },
+
+  {
+    'vim-test/vim-test',
+    cmd = { 'TestFile', 'TestNearest', 'TestSuite', 'TestLast', 'TestVisit' },
   },
 
   -- LSP
@@ -131,9 +171,10 @@ require('lazy').setup({
       }
 
       local capabilities = vim.lsp.protocol.make_client_capabilities()
-      -- Optimize for blink.cmp
-      if package.loaded['blink.cmp'] then
-        capabilities = require('blink.cmp').get_lsp_capabilities(capabilities)
+      -- Optimize for blink.cmp: try to require the module so capabilities are augmented
+      local ok, blink_cmp = pcall(require, 'blink.cmp')
+      if ok and type(blink_cmp.get_lsp_capabilities) == 'function' then
+        capabilities = blink_cmp.get_lsp_capabilities(capabilities)
       end
 
       -- LSP keymaps on attach
@@ -161,6 +202,11 @@ require('lazy').setup({
 
       -- Servers setup
       local servers = {
+        sourcekit = {
+          cmd = { 'xcrun', 'sourcekit-lsp' },
+          filetypes = { 'swift', 'objective-c', 'objective-cpp' },
+          root_dir = require('lspconfig').util.root_pattern('Package.swift', '.git', 'buildServer.json'),
+        },
         lua_ls = {
           settings = {
             Lua = {
@@ -185,10 +231,15 @@ require('lazy').setup({
       if mlsp.setup_handlers then
         mlsp.setup_handlers {
           function(server_name)
-            if server_name == 'tsserver' or server_name == 'ts_ls' then return end
+            if server_name == 'tsserver' or server_name == 'ts_ls' then
+              return
+            end
             local config = servers[server_name] or {}
             config.capabilities = capabilities
             require('lspconfig')[server_name].setup(config)
+          end,
+          ['sourcekit'] = function()
+            require('lspconfig').sourcekit.setup(servers.sourcekit)
           end,
         }
       end
@@ -239,25 +290,36 @@ require('lazy').setup({
   -- Completion (Rust-powered for speed and low RAM)
   {
     'saghen/blink.cmp',
+    lazy = false,
     dependencies = { 'rafamadriz/friendly-snippets', 'L3MON4D3/LuaSnip' },
     version = '*',
     event = 'InsertEnter',
     opts = {
+      cmdline = { sources = { 'cmdline' } },
       snippets = {
         preset = 'luasnip',
-        expand = function(snippet) require('luasnip').lsp_expand(snippet) end,
-        active = function(filter) return require('luasnip').locally_jumpable() end,
-        jump = function(direction) require('luasnip').jump(direction) end,
+        expand = function(snippet)
+          require('luasnip').lsp_expand(snippet)
+        end,
+        active = function(filter)
+          return require('luasnip').locally_jumpable()
+        end,
+        jump = function(direction)
+          require('luasnip').jump(direction)
+        end,
       },
       keymap = {
         preset = 'default',
-        ['<C-k>'] = { 'accept', 'fallback' },
+        ['<C-k>'] = { 'select_and_accept', 'fallback' },
       },
       appearance = {
         nerd_font_variant = 'mono',
       },
       sources = {
         default = { 'lsp', 'path', 'snippets', 'buffer' },
+        per_filetype = {
+          codecompanion = { 'codecompanion' },
+        },
       },
       completion = {
         list = { selection = { preselect = false, auto_insert = true } },
@@ -298,6 +360,7 @@ require('lazy').setup({
     dependencies = {
       'nvim-lua/plenary.nvim',
       'nvim-treesitter/nvim-treesitter',
+      'ibhagwan/fzf-lua',
     },
     opts = {
       adapters = {
@@ -305,7 +368,7 @@ require('lazy').setup({
           return require('codecompanion.adapters').extend('copilot', {
             schema = {
               model = {
-                default = 'gpt-4.1', -- Use exact Copilot model ID (verify in Copilot Chat)
+                default = 'gpt-5-mini',
               },
             },
           })
@@ -439,6 +502,7 @@ require('lazy').setup({
         python = { 'isort', 'black' },
         javascript = { 'prettier' },
         typescript = { 'prettier' },
+        swift = { 'swiftformat' },
       },
     },
   },
@@ -551,8 +615,8 @@ vim.keymap.set('n', '<leader>aa', '<cmd>CodeCompanionActions<CR>', { desc = 'AI 
 vim.keymap.set('n', '<leader>ail', ':CodeCompanion #{buffer} ', { desc = 'AI Inline (line)' })
 vim.keymap.set('n', '<leader>aia', function()
   vim.cmd 'normal! ggVG'
-  vim.cmd 'CodeCompanion #{buffer}'
-end, { desc = 'AI Inline (all)' })
+  vim.api.nvim_feedkeys(':CodeCompanion #{buffer} ', 'n', false)
+end, { desc = 'AI Inline (all, prompt editable)' })
 vim.keymap.set('v', '<leader>ai', ':CodeCompanion #{buffer} ', { desc = 'AI Inline (visual)' })
 vim.keymap.set('n', '<leader>ao', '<cmd>CodeCompanionChat<CR>', { desc = 'AI Chat' })
 vim.keymap.set('n', '<leader>ad', '<cmd>CodeCompanion /docs<CR>', { desc = 'AI Documentation' })
