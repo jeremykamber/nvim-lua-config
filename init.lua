@@ -62,6 +62,59 @@ vim.opt.rtp:prepend(lazypath)
 -- ============================================================================
 -- PLUGINS
 -- ============================================================================
+
+local float_state = {
+  last_win = nil,
+  offset_x = 2, -- How much to shift right each time
+  offset_y = 2, -- How much to shift down each time
+}
+
+local function get_tiled_position()
+  local width = math.floor(vim.o.columns * 0.4) -- 40% width for tiling
+  local height = math.floor(vim.o.lines * 0.5) -- 50% height
+
+  -- Check if the last window still exists and is valid
+  if float_state.last_win and vim.api.nvim_win_is_valid(float_state.last_win) then
+    local config = vim.api.nvim_win_get_config(float_state.last_win)
+    local new_col = config.col + float_state.offset_x
+    local new_row = config.row + float_state.offset_y
+
+    -- Reset to center if we drift too far off screen
+    if new_col + width > vim.o.columns or new_row + height > vim.o.lines then
+      return { width = width, height = height } -- Defaults to center
+    end
+
+    return { width = width, height = height, col = new_col, row = new_row, relative = 'editor' }
+  end
+
+  return { width = width, height = height } -- Default center for first window
+end
+
+local function search_windows()
+  local fzf = require 'fzf-lua'
+  local wins = vim.api.nvim_list_wins()
+  local items = {}
+
+  for _, win in ipairs(wins) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local name = vim.api.nvim_buf_get_name(buf)
+    local filename = name ~= '' and vim.fn.fnamemodify(name, ':t') or '[No Name]'
+
+    -- Format: "WindowID: Filename (Path)"
+    table.insert(items, string.format('%d: %s (%s)', win, filename, name))
+  end
+
+  fzf.fzf_exec(items, {
+    actions = {
+      ['default'] = function(selected)
+        local win_id = tonumber(selected[1]:match '^(%d+):')
+        vim.api.nvim_set_current_win(win_id)
+      end,
+    },
+    winopts = { title = ' Search Windows ', height = 0.3, width = 0.5 },
+  })
+end
+
 require('lazy').setup({
   -- Colorscheme
 
@@ -116,7 +169,16 @@ require('lazy').setup({
     event = { 'BufReadPost', 'BufNewFile' },
     main = 'nvim-treesitter.configs',
     opts = {
-      ensure_installed = { 'lua', 'python', 'javascript', 'typescript', 'tsx', 'css', 'html', 'swift' },
+      incremental_selection = {
+        enable = true,
+        keymaps = {
+          init_selection = '<CR>', -- Enter to start selecting
+          node_incremental = '<CR>', -- Enter to expand selection (function -> class)
+          scope_incremental = false,
+          node_decremental = '<bs>', -- Backspace to shrink
+        },
+      },
+      nsure_installed = { 'lua', 'python', 'javascript', 'typescript', 'tsx', 'css', 'html', 'swift' },
       auto_install = false,
       highlight = {
         enable = true,
@@ -129,6 +191,18 @@ require('lazy').setup({
         end,
       },
       indent = { enable = true },
+    },
+  },
+
+  {
+    'folke/snacks.nvim',
+    priority = 1000,
+    lazy = false,
+    opts = {
+      win = {
+        -- Optional: customize the default floating window style
+        style = 'float',
+      },
     },
   },
 
@@ -160,6 +234,7 @@ require('lazy').setup({
       'williamboman/mason.nvim',
       'williamboman/mason-lspconfig.nvim',
       'j-hui/fidget.nvim',
+      { 'yioneko/nvim-vtsls' },
     },
     config = function()
       require('mason').setup()
@@ -167,7 +242,7 @@ require('lazy').setup({
 
       local mlsp = require 'mason-lspconfig'
       mlsp.setup {
-        ensure_installed = { 'lua_ls', 'pyright' },
+        ensure_installed = { 'lua_ls', 'pyright', 'vtsls', 'biome' },
       }
 
       local capabilities = vim.lsp.protocol.make_client_capabilities()
@@ -180,6 +255,10 @@ require('lazy').setup({
       -- LSP keymaps on attach
       vim.api.nvim_create_autocmd('LspAttach', {
         callback = function(event)
+          local client = vim.lsp.get_client_by_id(event.data.client_id)
+          if not client then
+            return
+          end
           local map = function(keys, func, desc)
             vim.keymap.set('n', keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
           end
@@ -191,12 +270,15 @@ require('lazy').setup({
           map('gI', fzf.lsp_implementations, 'Goto Implementation')
           map('<leader>D', fzf.lsp_typedefs, 'Type Definition')
           map('<leader>ds', fzf.lsp_document_symbols, 'Document Symbols')
-          map('<leader>ws', fzf.lsp_live_workspace_symbols, 'Workspace Symbols')
-
+          map('<leader>ss', fzf.lsp_live_workspace_symbols, 'Search Symbols')
           map('<leader>rn', vim.lsp.buf.rename, 'Rename')
-          map('<leader>ca', vim.lsp.buf.code_action, 'Code Action')
+          map('<leader>ca', fzf.lsp_code_actions, 'Code Action')
           map('K', vim.lsp.buf.hover, 'Hover Documentation')
           map('gD', vim.lsp.buf.declaration, 'Goto Declaration')
+          if client.name == 'vtsls' then
+            vim.keymap.set('n', '<leader>co', '<cmd>VtslsCommand source.organizeImports<cr>', { buffer = event.buf, desc = '[O]rganize Imports' })
+            vim.keymap.set('n', '<leader>cm', '<cmd>VtslsCommand source.addMissingImports<cr>', { buffer = event.buf, desc = 'Add [M]issing Imports' })
+          end
         end,
       })
 
@@ -212,6 +294,23 @@ require('lazy').setup({
             Lua = {
               completion = { callSnippet = 'Replace' },
               diagnostics = { disable = { 'missing-fields' } },
+            },
+          },
+        },
+        vtsls = {
+          settings = {
+            typescript = {
+              tsserver = {
+                maxTsServerMemory = 1024, -- Hard cap at 1GB
+              },
+              -- -- ONLY check open files to save RAM
+              -- reportStyleChecksAsWarnings = false,
+              diagnostics = { ignoredCodes = { 80001, 80006 } }, -- Filter out noise
+            },
+            vtsls = {
+              autoUseWorkspaceTsdk = true,
+              -- Experimental features for speed
+              experimental = { completion = { enableServerSideFuzzyMatch = true } },
             },
           },
         },
@@ -231,6 +330,7 @@ require('lazy').setup({
       if mlsp.setup_handlers then
         mlsp.setup_handlers {
           function(server_name)
+            -- list of servers to IGNORE because they are handled elsewhere or too heavy
             if server_name == 'tsserver' or server_name == 'ts_ls' then
               return
             end
@@ -247,24 +347,6 @@ require('lazy').setup({
   },
 
   {
-    'pmizio/typescript-tools.nvim',
-    ft = { 'javascript', 'typescript', 'javascriptreact', 'typescriptreact' },
-    dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
-    opts = {
-      tsserver_max_memory = 1536, -- Reduced for more aggressive memory management
-      separate_diagnostic_server = true, -- Better UI responsiveness
-      publish_diagnostic_on = 'insert_leave', -- Reduces overhead
-      expose_as_code_action = 'all',
-      settings = {
-        tsserver_file_preferences = {
-          includeInlayParameterNameHints = 'none', -- Performance
-          includeInlayVariableTypeHints = false,
-        },
-      },
-    },
-  },
-
-  {
     'folke/lazydev.nvim',
     ft = 'lua',
     opts = {
@@ -278,7 +360,15 @@ require('lazy').setup({
     'zeioth/garbage-day.nvim',
     dependencies = 'neovim/nvim-lspconfig',
     event = 'VeryLazy',
-    opts = {},
+    opts = {
+      notifications = true, -- Useful to see when it's working; set to false later
+      grace_period = 300, -- 5 minutes of inactivity triggers the "garbage collection"
+      wakeup_delay = 0, -- Wake up the LSP immediately when you enter the buffer
+      -- Ensure it targets the heavy hitters
+      excluded_lsp_clients = {
+        'copilot', -- Keep Copilot alive as it's low RAM
+      },
+    },
   },
 
   {
@@ -388,34 +478,102 @@ require('lazy').setup({
     keys = {
       { '<leader>sf', '<cmd>FzfLua files<cr>', desc = 'Search Files' },
       { '<leader>sg', '<cmd>FzfLua live_grep<cr>', desc = 'Search by Grep' },
-      { '<leader>sw', '<cmd>FzfLua grep_cword<cr>', desc = 'Search current Word' },
+      { '<leader>sGc', '<cmd>FzfLua git_commits<cr>', desc = 'Search Git Commits' },
+      { '<leader>sGd', '<cmd>FzfLua git_diff<cr>', desc = 'Search Git Diff' },
+      { '<leader>sGb', '<cmd>FzfLua git_branches<cr>', desc = 'Search Git Branches' },
+      { '<leader>sGs', '<cmd>FzfLua git_status<cr>', desc = 'Search Git Status' },
       { '<leader><leader>', '<cmd>FzfLua buffers<cr>', desc = 'Find buffers' },
       { '<leader>sh', '<cmd>FzfLua help_tags<cr>', desc = 'Search Help' },
       { '<leader>sk', '<cmd>FzfLua keymaps<cr>', desc = 'Search Keymaps' },
       { '<leader>sr', '<cmd>FzfLua resume<cr>', desc = 'Search Resume' },
       { '<leader>s.', '<cmd>FzfLua oldfiles<cr>', desc = 'Search Recent Files' },
-      { '<leader>sd', '<cmd>FzfLua diagnostics_document<cr>', desc = 'Search Document Diagnostics' },
-      { '<leader>sD', '<cmd>FzfLua diagnostics_workspace<cr>', desc = 'Search Workspace Diagnostics' },
+      { '<leader>sDa', '<cmd>FzfLua diagnostics_document<cr>', desc = 'Search Document Diagnostics' },
+      { '<leader>sda', '<cmd>FzfLua diagnostics_workspace<cr>', desc = 'Search Workspace Diagnostics' },
+      { '<leader>sf', '<cmd>FzfLua files<cr>', desc = 'Search Files' },
+      { '<leader>sg', '<cmd>FzfLua live_grep<cr>', desc = 'Search by Grep' },
+      { '<leader><leader>', '<cmd>FzfLua buffers<cr>', desc = 'Find buffers' },
+      { '<leader>sh', '<cmd>FzfLua help_tags<cr>', desc = 'Search Help' },
+      { '<leader>sk', '<cmd>FzfLua keymaps<cr>', desc = 'Search Keymaps' },
+      { '<leader>sr', '<cmd>FzfLua resume<cr>', desc = 'Search Resume' },
+      { '<leader>s.', '<cmd>FzfLua oldfiles<cr>', desc = 'Search Recent Files' },
+
+      -- All Diagnostics (Document/Workspace)
+      { '<leader>sDa', '<cmd>FzfLua diagnostics_document<cr>', desc = 'Search Doc Diagnostics' },
+      { '<leader>sda', '<cmd>FzfLua diagnostics_workspace<cr>', desc = 'Search Project Diagnostics' },
+
+      -- ERRORS (sde = all errors, sDe = current file errors)
+      { '<leader>sde', '<cmd>FzfLua diagnostics_workspace severity=error<cr>', desc = 'Search Project Errors' },
+      { '<leader>sDe', '<cmd>FzfLua diagnostics_document severity=error<cr>', desc = 'Search Doc Errors' },
+
+      -- WARNINGS (sdw = all warnings, sDw = current file warnings)
+      { '<leader>sdw', '<cmd>FzfLua diagnostics_workspace severity=warning<cr>', desc = 'Search Project Warnings' },
+      { '<leader>sDw', '<cmd>FzfLua diagnostics_document severity=warning<cr>', desc = 'Search Doc Warnings' },
     },
-    opts = {
-      keymap = {
-        fzf = {
-          ['ctrl-d'] = 'preview-page-down',
-          ['ctrl-u'] = 'preview-page-up',
+    opts = function()
+      local fzf = require 'fzf-lua'
+
+      -- Custom function to open file in a Snacks float
+
+      local open_in_snacks_float = function(selected)
+        if not selected or #selected == 0 then
+          return
+        end
+        local file = require('fzf-lua').path.entry_to_file(selected[1]).path
+        local pos = get_tiled_position()
+
+        local win = require('snacks').win {
+          file = file,
+          width = pos.width,
+          height = pos.height,
+          col = pos.col,
+          row = pos.row,
+          relative = pos.relative or 'editor',
+          -- --- STYLING START ---
+          border = 'rounded',
+          title = ' ' .. vim.fn.fnamemodify(file, ':t') .. ' ', -- Filename as title
+          title_pos = 'center',
+          backdrop = 100,
+          wo = {
+            winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:FloatTitle',
+            cursorline = true, -- Highlight current line in the float
+          },
+          -- --- STYLING END ---
+        }
+
+        float_state.last_win = win.win
+      end
+      return {
+        keymap = {
+          fzf = {
+            ['ctrl-d'] = 'preview-page-down',
+            ['ctrl-u'] = 'preview-page-up',
+          },
+          builtin = {
+            ['<C-d>'] = 'preview-page-down',
+            ['<C-u>'] = 'preview-page-up',
+          },
         },
-        builtin = {
-          ['<C-d>'] = 'preview-page-down',
-          ['<C-u>'] = 'preview-page-up',
+        -- Add the custom action to all file/buffer pickers
+        actions = {
+          files = {
+            ['default'] = fzf.actions.file_edit,
+            ['ctrl-o'] = open_in_snacks_float, -- Bind to Ctrl-f
+            ['ctrl-q'] = fzf.actions.files_to_qf,
+          },
+          buffers = {
+            ['default'] = fzf.actions.buf_edit,
+            ['ctrl-o'] = open_in_snacks_float,
+          },
         },
-      },
-      winopts = {
-        preview = {
-          hidden = 'nohidden',
-          vertical = 'down:45%',
-          layout = 'vertical',
+        winopts = {
+          preview = {
+            hidden = 'nohidden',
+            vertical = 'down:45%',
+            layout = 'vertical',
+          },
         },
-      },
-    },
+      }
+    end,
   },
 
   -- oil.nvim (Fast file exploration)
@@ -500,8 +658,8 @@ require('lazy').setup({
       formatters_by_ft = {
         lua = { 'stylua' },
         python = { 'isort', 'black' },
-        javascript = { 'prettier' },
-        typescript = { 'prettier' },
+        javascript = { 'biome' },
+        typescript = { 'biome' },
         swift = { 'swiftformat' },
       },
     },
@@ -579,7 +737,7 @@ require('lazy').setup({
 })
 
 -- ============================================================================
--- KEYMAPS
+-- *KEYMAPS*
 -- ============================================================================
 
 -- Clear search highlight
@@ -594,6 +752,7 @@ vim.keymap.set('n', '<leader>.', ':lua vim.lsp.buf.code_action()<CR>', { desc = 
 vim.keymap.set('n', '<leader>bd', '<cmd>bnext<CR><cmd>bd#<CR>', { desc = 'Close buffer' })
 vim.keymap.set('n', '<Tab>', '<cmd>bnext<CR>', { desc = 'Next buffer' })
 vim.keymap.set('n', '<S-Tab>', '<cmd>bprevious<CR>', { desc = 'Previous buffer' })
+vim.keymap.set('n', '-', '<cmd>b#<CR>', { desc = 'Switch to last buffer' })
 
 -- Config shortcuts
 vim.keymap.set('n', '<leader>so', '<cmd>source ~/.config/nvim/init.lua<CR>', { desc = 'Source config' })
@@ -602,6 +761,40 @@ vim.keymap.set('n', '<leader>i', '<cmd>e ~/.config/nvim/init.lua<CR>', { desc = 
 -- File/write shortcuts
 vim.keymap.set('n', '<leader>wf', '<cmd>w<CR>', { desc = 'Write File' })
 -- <leader>pv is handled by oil.nvim now
+
+-- Floating windows
+vim.keymap.set('n', '<leader>sw', search_windows, { desc = 'Search Open Windows' })
+
+-- Pop current buffer into a floating window
+vim.keymap.set('n', '<leader>o', function()
+  local pos = get_tiled_position()
+  local win = require('snacks').win {
+    buf = vim.api.nvim_get_current_buf(),
+    width = pos.width,
+    height = pos.height,
+    col = pos.col,
+    row = pos.row,
+    relative = pos.relative or 'editor',
+  }
+  float_state.last_win = win.win
+end, { desc = 'Float current buffer (Tiled)' })
+
+-- Add these to your KEYMAPS section
+local function goto_next_error()
+  vim.diagnostic.goto_next { severity = vim.diagnostic.severity.ERROR }
+end
+
+local function goto_prev_error()
+  vim.diagnostic.goto_prev { severity = vim.diagnostic.severity.ERROR }
+end
+
+-- Keybinds for jumping specifically to errors
+vim.keymap.set('n', ']e', goto_next_error, { desc = 'Next Error' })
+vim.keymap.set('n', '[e', goto_prev_error, { desc = 'Prev Error' })
+
+-- Quickfix navigation (to cycle through fzf-lua results sent via Alt-q)
+vim.keymap.set('n', ']q', '<cmd>cnext<cr>zz', { desc = 'Next Quickfix Item' })
+vim.keymap.set('n', '[q', '<cmd>cprev<cr>zz', { desc = 'Prev Quickfix Item' })
 
 -- Terminal
 vim.keymap.set('n', '<leader>wt', '<cmd>12sp | term<CR>', { desc = 'Open terminal' })
@@ -710,3 +903,50 @@ vim.diagnostic.config {
     spacing = 2,
   },
 }
+
+local float_dim_group = vim.api.nvim_create_augroup('FloatDimming', { clear = true })
+
+vim.api.nvim_create_autocmd({ 'WinEnter', 'WinLeave' }, {
+  group = float_dim_group,
+  callback = function(ev)
+    local win = vim.api.nvim_get_current_win()
+    local config = vim.api.nvim_win_get_config(win)
+
+    -- Check if current window is a floating window
+    if config.relative ~= '' then
+      if ev.event == 'WinEnter' then
+        -- Brighten and highlight border when focused
+        vim.wo[win].winblend = 0
+        vim.api.nvim_set_hl(0, 'SnacksBackdrop', { bg = '#000000', blend = 80 }) -- Dim background more
+      else
+        -- Dim the window when leaving
+        vim.wo[win].winblend = 20
+      end
+    end
+  end,
+})
+
+vim.api.nvim_create_autocmd({ 'WinEnter', 'WinLeave' }, {
+  group = float_dim_group,
+  callback = function(ev)
+    local win = vim.api.nvim_get_current_win()
+    local config = vim.api.nvim_win_get_config(win)
+
+    if config.relative ~= '' then
+      if ev.event == 'WinEnter' then
+        vim.wo[win].winblend = 0
+        -- Active border color (Blue)
+        vim.api.nvim_win_set_option(win, 'winhighlight', 'FloatBorder:FloatBorder,Normal:NormalFloat')
+      else
+        vim.wo[win].winblend = 20
+        -- Dimmed border color (Grey/Muted)
+        vim.api.nvim_win_set_option(win, 'winhighlight', 'FloatBorder:Comment,Normal:NormalFloat')
+      end
+    end
+  end,
+})
+
+-- Custom highlights for floating windows
+vim.api.nvim_set_hl(0, 'FloatBorder', { fg = '#7aa2f7' }) -- Match TokyoNight blue
+vim.api.nvim_set_hl(0, 'FloatTitle', { fg = '#bb9af7', bold = true }) -- Purple title
+vim.api.nvim_set_hl(0, 'NormalFloat', { bg = '#1a1b26' }) -- Deep background
