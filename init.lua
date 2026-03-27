@@ -4,6 +4,8 @@
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
+vim.o.swapfile = false
+
 -- Performance
 vim.opt.updatetime = 200
 vim.opt.timeoutlen = 300
@@ -132,8 +134,16 @@ require('lazy').setup({
     'folke/tokyonight.nvim',
     lazy = false,
     priority = 1000,
+    -- config = function()
+    --   vim.cmd.colorscheme 'tokyonight-night'
+    -- end,
+  },
+
+  {
+    'kepano/flexoki-neovim',
+    name = 'flexoki',
     config = function()
-      vim.cmd.colorscheme 'tokyonight-night'
+      vim.cmd.colorscheme 'flexoki'
     end,
   },
 
